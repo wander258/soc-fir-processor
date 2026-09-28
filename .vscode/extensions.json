@@ -1,0 +1,11 @@
+{
+  "recommendations": [
+    "mshr-h.veriloghdl",
+    "sterben.fpga",
+    "eamodio.gitlens",
+    "github.vscode-pull-request-github",
+    "wavedrom.wavedrom",
+    "ms-python.python",
+    "ms-vscode.cpptools"
+  ]
+}

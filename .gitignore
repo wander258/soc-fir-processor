@@ -1,0 +1,44 @@
+# ===== 仿真产物 =====
+*.vcd
+*.vcd.gz
+*.fst
+*.lxt
+*.lxt2
+*.dump
+*.vvp
+simv
+simv.*
+obj_dir/
+logs/
+
+# ===== 编译产物 =====
+*.o
+*.a
+*.elf
+*.bin
+*.hex
+*.out
+*.map
+build/
+dist/
+
+# ===== 波形 / 仿真日志 =====
+*.wlf
+*.wdb
+transcript
+work/
+*.log
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ===== 编辑器 / 系统 =====
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+*.bak

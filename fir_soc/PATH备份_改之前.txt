@@ -1,0 +1,1 @@
+﻿E:\JetBrains\GNU Arm Embedded Toolchain\10 2021.10\bin;C:\Users\27523\AppData\Local\Microsoft\WindowsApps;E:\biancheng\VS_code\Microsoft VS Code\bin;E:\biancheng\VS_code\MSYS2\ucrt64\bin;E:\JetBrains\CLion 2025.2.3\bin;E:\JetBrains\OpenOCD\bin;C:\Users\27523\AppData\Local\PowerToys\DSCModules\;C:\Users\27523\AppData\Roaming\npm

@@ -127,11 +127,8 @@ iverilog -V
 
 能打印版本号就成了。
 
-**想还原**（原来的值我备份在 `_PATH备份.txt`）：
-
-```powershell
-[Environment]::SetEnvironmentVariable("Path", (Get-Content "E:\Deepseek Harness\fir_soc\_PATH备份.txt" -Raw).Trim(), "User")
-```
+> 说明：`sim.ps1` 已经自动找到 `E:\FPGA\OSS-CAD-suite\oss-cad-suite\bin` 并加入 PATH，
+> 所以**通常你根本不用改系统 PATH**。上面这一节只在"换电脑/换安装位置"时才需要。
 
 ---
 

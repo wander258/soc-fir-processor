@@ -35,7 +35,7 @@ $dir  = Join-Path $root $Lab
 
 if (-not (Test-Path $dir)) {
     Write-Host "找不到实验目录: $dir" -ForegroundColor Red
-    Write-Host "可用的实验: 01_counter 02_delayline 03_mac 04_fir9 05_fir81 06_axi_lite 07_fir_axi 08_soc" -ForegroundColor Yellow
+    Write-Host "可用的实验: 01_counter 02_delayline 03_mac 04_fir9 05_fir81 06_axi_lite 07_fir_axi 08_soc 09_soc_cm0 10_dma" -ForegroundColor Yellow
     exit 1
 }
 
@@ -49,6 +49,10 @@ switch ($Lab) {
     "06_axi_lite"  { $top = "tb_axi_sram";   $src = @("rtl\axi_lite_sram.v", "06_axi_lite\tb_axi_sram.v") }
     "07_fir_axi"   { $top = "tb_fir_axi";    $src = @("rtl\fir_axi.v", "rtl\fir_cfg.v", "rtl\sync_fifo.v", "07_fir_axi\tb_fir_axi.v") }
     "08_soc"       { $top = "tb_soc";        $src = @("rtl\soc_top.v", "rtl\axi_lite_xbar.v", "rtl\fir_axi.v", "rtl\fir_cfg.v", "rtl\sync_fifo.v", "rtl\uart_axi.v", "rtl\uart_tx.v", "rtl\axi_lite_sram.v", "08_soc\tb_soc.v") }
+    "09_soc_cm0"   { $top = "tb_soc_cm0";
+                     $src = @("cpu\cortexm0ds\cortexm0ds.v","cpu\cortexm0ds\cortexm0ds_logic.v","cpu\cortexm0ds\ahb2axi4_if.v","cpu\cortexm0ds\ahb2axi4_ahb.v","cpu\cortexm0ds\ahb2axi4_axi.v","cpu\cortexm0ds\ahb2axi4_burst.v","cpu\cortexm0ds\ahb2axi4_fifo.v","cpu\cortexm0ds\ahb_axi_define.v","cpu\cmsdk_axi_ram_beh.v","rtl\axi4_to_axilite.v","rtl\fir_axi.v","rtl\fir_cfg.v","rtl\sync_fifo.v","rtl\uart_axi.v","rtl\uart_tx.v","rtl\soc_cm0_top.v","09_soc_cm0\tb_soc_cm0.v")
+                     $inc = @("cpu\cortexm0ds") }
+    "10_dma"       { $top = "tb_dma";        $src = @("rtl\dma.v", "10_dma\tb_dma.v") }
     default        { Write-Host "未知实验: $Lab" -ForegroundColor Red; exit 1 }
 }
 
@@ -92,11 +96,14 @@ Write-Host "编译中 ..." -ForegroundColor Cyan
 Push-Location $dir
 try {
     $files = $src | ForEach-Object { Join-Path $root $_ }
+    $incPaths = @($dir)
+    if ($inc) { $incPaths += $inc | ForEach-Object { Join-Path $root $_ } }
+    $incArgs = $incPaths | ForEach-Object { "-I"; $_ }
 
     # -g2012      用 SystemVerilog-2012 语法（兼容性最好）
     # -I $dir     让 `include "coeffs.vh" 能找到文件
     # -s $top     指定顶层模块（testbench）
-    & iverilog -g2012 -I $dir -o sim.out -s $top @files
+    & iverilog -g2012 @incArgs -o sim.out -s $top @files
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host ""

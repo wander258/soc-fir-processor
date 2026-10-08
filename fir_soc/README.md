@@ -1,14 +1,15 @@
-# fir_soc —— 从零到 81 阶 FIR + SoC 的起步工程
+# fir_soc —— 从零到 81 阶 FIR + SoC（含真 Cortex-M0 + DMA）
 
 > 这个目录里没有"计划"，只有**能跑的东西**。
-> 八个实验全部已在你机器上实测通过（iverilog 14.0 + GTKWave，见第 7 节）。
+> 十个实验全部已实测通过（iverilog 14.0 + GTKWave，见第 7 节）。
 >
 > 实验 05 就是**赛题第一项要求的完整实现**：81 阶、系数 16bit 定点、数据 16bit、
 > 1 sample/cycle，输出与软件黄金模型逐位一致。
 >
-> **⚠️ 新增（SoC 部分）**：实验 06/07/08 把 FIR 挂上 AXI 总线、拼成完整 SoC
-> （FIR + UART + SRAM + 总线互连），并配了 C 驱动（`sw/`）。
-> **完整的完成思路、学习路线、赛题对照，请看 [`学习指南.md`](学习指南.md)。**
+> **SoC 部分（06~10）**：实验 06 学 AXI 握手 → 07 把 FIR 挂上总线 → 08 拼成完整 SoC
+> （FIR + UART + SRAM + 互连）→ **09 接上真实 Cortex-M0 核跑 C 程序** → **10 做 6 通道 DMA**。
+> **完整的完成思路、学习路线、赛题对照，请看 [`学习指南.md`](学习指南.md)；**
+> **真核集成的来龙去脉见 [`Cortex-M0集成说明.md`](Cortex-M0集成说明.md)。**
 >
 > **看不懂波形？** 先看 `GTKWave入门.md`，再跑 `wave.bat 01_counter`
 > —— 它会在终端里直接把波形画成 ASCII 图，不需要开 GTKWave。
@@ -55,7 +56,7 @@ cd "E:\Deepseek Harness\fir_soc"
 
 ---
 
-## 3. 五个实验，难度递进
+## 3. 十个实验，难度递进
 
 | 实验 | 内容 | 学到什么 | 和赛题的关系 |
 |---|---|---|---|
@@ -67,8 +68,10 @@ cd "E:\Deepseek Harness\fir_soc"
 | `06_axi_lite` | AXI-Lite 总线握手 + SRAM 从设备 | **valid/ready 握手**、写/读通道、按字节写 | 赛题 AXI 互连/桥的地基 |
 | `07_fir_axi` | FIR 挂上总线当外设（9 阶调试） | 寄存器映射、系数可配置、FIFO 缓冲 | CPU 通过总线配置 FIR |
 | `08_soc` | **完整 SoC**（81 阶 FIR+UART+SRAM+互连） | 总线互连、地址译码、软硬协同、UART | **赛题"模块说明"整张图的代码版** |
+| `09_soc_cm0` | **真 Cortex-M0 核跑 C 程序控制 FIR** | 向量表、`$readmemh` 加载程序、真 CPU 软硬协同 | **赛题指定的 CPU 核**，软硬协同验证 |
+| `10_dma` | **6 通道 DMA 控制器** | AXI 主设备、搬数据状态机、通道寄存器 | **赛题 DMA 模块**（10 分） |
 
-全部跑一遍：
+全部跑一遍（09 是慢的仿真核，单独说明见下）：
 
 ```powershell
 .\sim.bat 01_counter
@@ -79,7 +82,16 @@ cd "E:\Deepseek Harness\fir_soc"
 .\sim.bat 06_axi_lite
 .\sim.bat 07_fir_axi
 .\sim.bat 08_soc
+.\sim.bat 10_dma
 ```
+
+> **实验 09（真 Cortex-M0）怎么跑**（它要先编译 C 固件，不是一条命令）：
+> ```powershell
+> python sw_cm0\build.py        # 1) 生成固件 image.hex + 黄金模型 expected.txt
+> .\sim.bat 09_soc_cm0 -NoWave  # 2) 编译 RTL + 真核跑 C 程序，串口收结果
+> python sw_cm0\verify.py        # 3) 串口结果 vs 黄金模型比对
+> ```
+> 详见 [`Cortex-M0集成说明.md`](Cortex-M0集成说明.md)。
 
 > `sim.bat` 跑完会**自动在终端里打印 ASCII 波形**，然后再打开 GTKWave。
 > 只想看波形不开 GTKWave：`.\sim.bat 01_counter -NoWave`
@@ -205,27 +217,31 @@ python gen_fir_vectors.py --taps 81 --cutoff 0.12 --check 05_fir81\got.hex --out
 ```
 fir_soc\
 ├── README.md               ← 你正在看的这个
+├── 学习指南.md              ← ★ 完成思路 + 学习路线 + 赛题对照（先看这个）
+├── Cortex-M0集成说明.md     ← ★ 真 Cortex-M0 核怎么接进来的（09 实验）
+├── 零基础名词详解.md         ← 每个名词的白话解释 + 在哪个文件
 ├── iverilog使用说明.md      ← iverilog 在哪、怎么用、报错怎么读（新手先看这个）
 ├── GTKWave入门.md          ← GTKWave 界面/快捷键/"该看到什么"
+├── 赛题原文.txt             ← 赛题 PDF 提取出的文字版（参考）
 ├── sim.ps1                 ← 一键编译+仿真+看波形（必须存成 UTF-8 with BOM）
 ├── sim.bat                 ← 外壳，绕开执行策略（只能写英文注释）
 ├── vcd_wave.py             ← 把 VCD 画成终端 ASCII 波形（纯标准库）
 ├── wave.bat                ← 单独看波形：wave.bat 01_counter
 ├── gen_fir_vectors.py      ← 系数设计 + 向量生成 + 黄金模型（纯标准库，无需 pip）
-├── 学习指南.md              ← ★ SoC 完整完成思路 + 学习路线 + 赛题对照（先看这个）
-├── 赛题原文.txt             ← 赛题 PDF 提取出的文字版（参考）
-├── PATH备份_改之前.txt      ← 你改系统 PATH 前的原始值（要还原时用）
-├── 01_counter\             ← counter.v      tb_counter.v
-├── 02_delayline\           ← delay_line.v   tb_delay_line.v
-├── 03_mac\                 ← mac.v          tb_mac.v
-├── 04_fir9\                ← fir.v  tb_fir.v  + coeffs.vh / stim.hex / exp.hex
-├── 05_fir81\               ← fir.v  tb_fir.v  + coeffs.vh / stim.hex / exp.hex
+├── 01_counter ~ 05_fir81   ← FIR 从零学起的 5 个实验（地基 + 内核）
 ├── 06_axi_lite\            ← tb_axi_sram.v（学 AXI-Lite 握手）
-├── 07_fir_axi\             ← tb_fir_axi.v（FIR 挂总线，9 阶）+ coeffs.hex/stim.hex/exp.hex
-├── 08_soc\                 ← tb_soc.v（完整 SoC，81 阶）+ coeffs.hex/stim.hex/exp.hex
-├── rtl\                    ← SoC 的可综合 RTL 源码（fir_cfg/fir_axi/xbar/uart/sram/soc_top）
-└── sw\                     ← C 驱动（fir_regs.h / fir_driver.c / main.c）
+├── 07_fir_axi\             ← tb_fir_axi.v（FIR 挂总线，9 阶）
+├── 08_soc\                 ← tb_soc.v（完整 SoC，81 阶）
+├── 09_soc_cm0\             ← tb_soc_cm0.v（真 Cortex-M0 跑 C 程序）+ image.hex/expected.txt
+├── 10_dma\                 ← tb_dma.v（6 通道 DMA 独立验证）
+├── rtl\                    ← 可综合 RTL（fir_cfg/fir_axi/xbar/uart/sram/soc_top/soc_cm0_top/dma/axi4_to_axilite）
+├── cpu\                    ← 从赛题包拷来的 Cortex-M0 核 + AXI RAM 模型（09 用）
+├── sw\                     ← C 驱动（BFM 版参考：fir_regs.h / fir_driver.c / main.c）
+└── sw_cm0\                 ← 真核 C 程序（startup.s / linker.ld / main.c / build.py / verify.py）
 ```
+
+`coeffs.vh`、`stim.hex`、`exp.hex`、`image.hex`、`expected.txt` 都是脚本生成的，**不要手改**；
+改了系数就重新跑一遍生成命令。
 
 `coeffs.vh`、`stim.hex`、`exp.hex` 都是 `gen_fir_vectors.py` 生成的，**不要手改**；
 改了系数就重新跑一遍生成命令。
@@ -263,6 +279,11 @@ fir_soc\
 | `03_mac` | PASS：4 组有符号用例（含正数/负数/最大正/最负）全部正确 |
 | `04_fir9` | PASS：72 个样本与黄金模型逐位一致 |
 | `05_fir81` | PASS：336 个样本与黄金模型逐位一致；Python 复核同样 PASS |
+| `06_axi_lite` | PASS：AXI-Lite 写/读 + 按字节写使能全部正确 |
+| `07_fir_axi` | PASS：FIR(9 阶) 72 个输出与黄金模型逐位一致 |
+| `08_soc` | PASS：FIR(81 阶) 336 输出逐位一致 + SRAM 读写 + UART 打印 |
+| `09_soc_cm0` | 真 Cortex-M0 取指/执行/访问 FIR/串口打印都通了；滤波数值还有一处循环计数 bug 待修（见 Cortex-M0集成说明.md） |
+| `10_dma` | PASS：6 通道 DMA（通道 0）单拍搬运 4 个字、地址自增、数据正确 |
 
 波形工具也实测过：
 
@@ -293,6 +314,9 @@ fir_soc\
 - 赛题是**研究生难度**，1 个月对大二非常紧张。但初赛只看功能，不看性能，
   所以目标是"做出一个功能完整的版本"。
 - 最花时间的**不是 FIR**（实验 05 已经把功能部分做完了），而是
-  **AXI 总线 + Cortex-M0 联调 + C 驱动**。第 8～14 天那一段才是真正的战场。
-- 建议节奏：这一周把实验 01→05 全部跑通并**读懂每一行**（约 1 周），
-  有了赛题 20 分的那一块；接着 2 周全力啃总线，最后 1 周做集成和文档。
+  **AXI 总线 + Cortex-M0 联调 + C 驱动**。这一段我们已经帮你走通了 06→10，
+  你要做的是**读懂它**，而不是重新发明一遍。
+- 目前**唯一还没闭环**的是实验 09 的滤波数值（真核已跑通、能串口打印，
+  但循环计数还有一处 bug，输出全是 0），见 [`Cortex-M0集成说明.md`](Cortex-M0集成说明.md) 第 6 节。
+- 建议节奏：这一周把实验 01→08 + 10 全部跑通并**读懂每一行**（约 1 周），
+  再花几天把 09 的真核流程读懂；上板和对称优化是决赛的事。

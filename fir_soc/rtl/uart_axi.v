@@ -12,7 +12,8 @@
 
 module uart_axi #(
     parameter ADDR_W = 32,
-    parameter DATA_W = 32
+    parameter DATA_W = 32,
+    parameter BAUD   = 115200     // 波特率（仿真时可调大加速）
 )(
     input  wire                 clk,
     input  wire                 rst_n,
@@ -47,7 +48,7 @@ module uart_axi #(
     reg       tx_start;
     wire      tx_busy;
 
-    uart_tx u_tx (
+    uart_tx #(.BAUD(BAUD)) u_tx (
         .clk(clk), .rst_n(rst_n),
         .din(tx_data), .start(tx_start),
         .txd(txd), .busy(tx_busy)

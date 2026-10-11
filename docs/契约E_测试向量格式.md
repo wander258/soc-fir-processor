@@ -85,5 +85,4 @@ python fir/fir_coeff.py --taps 81 --cutoff 0.12 --nsamp 256
 
 ## 遗留事项（不阻塞本契约）
 
-- STATUS 的 done/err 位（契约 C 缺口，属 B，与本契约无关）。
 - 误差报告的文件名/格式（属 C 的 `docs/系数与黄金模型说明.md`，不在本契约）。

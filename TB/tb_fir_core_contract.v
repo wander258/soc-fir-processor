@@ -137,22 +137,34 @@ module tb_fir_core_contract;
         @(negedge clk); flush = 1'b0;
         repeat (LAT + 2) @(posedge clk);
 
-        // 自己数一遍，同时把值抓下来
-        begin : a23
+        // ---- A2：只给一拍 en，数 dout_v 第几拍来 ----
+        begin : a2blk
             integer lat;
-            reg signed [DW-1:0] captured;
-            lat = 0;
-            captured = 0;
             @(negedge clk); en = 1'b1; din = 16'sd1000;
             @(negedge clk); en = 1'b0; din = 16'sd0;
+            lat = 0;
             while (dout_v !== 1'b1 && lat < 50) begin
                 @(posedge clk);
                 lat = lat + 1;
             end
-            captured = dout;
             chk(lat, LAT, "A2 流水线延迟拍数");
-            chk(captured, 16'sd500, "A3 dout_v 那一拍的 dout 值（h0*1000>>15）");
         end
+        repeat (LAT + 4) @(posedge clk);
+
+        // ---- A3：连续喂两拍，验 dout_v 与 dout 同拍 + 数值 ----
+        //      乘积用的是【移位前】的 x[]，
+        //      所以第 1 个输出对应 x 全零（前导 0），第 2 个才是真结果。
+        //      ⚠️ 必须先 flush：A2 那一拍已经把 1000 移进 x[0] 了。
+        do_flush;
+        begin : a3blk
+            @(negedge clk); en = 1'b1; din = 16'sd1000;
+            while (dout_v !== 1'b1) @(posedge clk);
+            chk(dout, 16'sd0,   "A3 第 1 个输出（前导，x 全零）");
+            @(posedge clk);
+            chk(dout, 16'sd500, "A3 第 2 个输出（x=[1000]，h0*1000>>15）");
+            @(negedge clk); en = 1'b0; din = 16'sd0;
+        end
+        repeat (LAT + 4) @(posedge clk);
 
         // ----------------------------------------------------
         // A4：flush 清零（系数要保留）
@@ -169,16 +181,15 @@ module tb_fir_core_contract;
         // flush 之后重新喂同一个样本，结果应与 flush 前一致（系数没被清掉）
         begin : a4b
             integer lat;
-            reg signed [DW-1:0] captured;
-            lat = 0; captured = 0;
+            lat = 0;
             @(negedge clk); en = 1'b1; din = 16'sd1000;
-            @(negedge clk); en = 1'b0; din = 16'sd0;
             while (dout_v !== 1'b1 && lat < 50) begin
                 @(posedge clk);
                 lat = lat + 1;
             end
-            captured = dout;
-            chk(captured, 16'sd500, "A4 flush 后系数仍保留（结果不变）");
+            @(posedge clk);        // 跳过前导 0
+            chk(dout, 16'sd500, "A4 flush 后系数仍保留（结果与 flush 前一致）");
+            @(negedge clk); en = 1'b0; din = 16'sd0;
         end
 
         // ----------------------------------------------------
@@ -242,17 +253,16 @@ module tb_fir_core_contract;
         do_flush;
         begin : a5
             integer lat;
-            reg signed [DW-1:0] captured;
-            lat = 0; captured = 0;
+            lat = 0;
             @(negedge clk); en = 1'b1; din = 16'sd1000;
-            @(negedge clk); en = 1'b0; din = 16'sd0;
             while (dout_v !== 1'b1 && lat < 50) begin
                 @(posedge clk);
                 lat = lat + 1;
             end
-            captured = dout;
+            @(posedge clk);        // 跳过前导 0
             // 32767*1000>>15 = 999.97 → 截位得 999
-            chk(captured, 16'sd999, "A5 新系数应立刻生效（32767*1000>>15）");
+            chk(dout, 16'sd999, "A5 新系数应立刻生效（32767*1000>>15）");
+            @(negedge clk); en = 1'b0; din = 16'sd0;
         end
 
         repeat (10) @(posedge clk);

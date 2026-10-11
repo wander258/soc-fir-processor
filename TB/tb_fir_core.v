@@ -5,16 +5,16 @@
 //   本文件      ：81 阶 × 256 个样本，和黄金模型的 336 个输出逐位比对
 //   契约自检台  ：只验 A1~A6 六条接口约定，不依赖外部文件
 //
-// 数据来源（在 fir/ 目录下，由 fir/gen_fir_vectors.py 生成）：
+// 数据来源（在 fir/ 目录下，由 fir/fir_coeff.py 生成，见契约 D/E）：
 //   coeffs.hex  81 个 Q1.15 系数（测试台通过 coef 写口写进去，不 `include）
 //   stim.hex    256 个输入样本
 //   exp.hex     336 个期望输出（全卷积长度 = 样本数 + 抽头数 - 1）
 //
 // 运行（从仓库根目录）：
-//   python fir/fir_coeff.py --taps 81 --cutoff 0.12 --nsamp 256    （当前脚本名 gen_fir_vectors.py）
+//   python fir/fir_coeff.py --taps 81 --cutoff 0.12 --nsamp 256
 //   iverilog -g2012 -o sim.out RTL/fir_core.v TB/tb_fir_core.v && vvp sim.out
 //
-// 比对约定（必须和 fir/gen_fir_vectors.py 一致）：
+// 比对约定（必须和 fir/fir_coeff.py 一致，见契约 E.6）：
 //   第 1 个 dout_v 输出 = 全零输入的卷积结果（一个前导 0）
 //   第 2 个 dout_v 输出 = exp[0]
 //   即：  got[i+1] == exp[i]

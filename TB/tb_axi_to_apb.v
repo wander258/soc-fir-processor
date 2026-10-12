@@ -6,7 +6,10 @@
 //   2) APB 从设备模型    —— 扮演 UART 那类外设，16 个寄存器，
 //                           可以配置等待拍数和错误地址
 //
-// 除了功能比对，它还实时检查 APB 协议（IHI0024 第 3/4 章）：
+// 除了功能比对，它还挂了两套协议检查器：
+//   · AXI 协议检查器（axi_protocol_checker.v，C 的交付物）——
+//     接在桥的 AXI 从口上，检查 14 条 AXI4 协议规则
+//   · APB 协议检查器（本文件内部实现，IHI0024 第 3/4 章）：
 //   · PENABLE 不能脱离 PSEL
 //   · PENABLE 拉高前 PSEL 必须已经有效至少一拍（SETUP 阶段）
 //   · PADDR/PWRITE/PWDATA 在 SETUP→ACCESS 之间必须保持稳定
@@ -137,6 +140,36 @@ module tb_axi_to_apb;
         .psel(psel), .penable(penable), .paddr(paddr), .pwrite(pwrite),
         .pwdata(pwdata), .pstrb(pstrb), .pprot(pprot),
         .prdata(prdata), .pready(pready), .pslverr(pslverr)
+    );
+
+    // ============================================================
+    // AXI 协议检查器 —— 挂在桥的 AXI 从口上，实时检查事务是否符合 AXI4
+    //
+    // ⚠️ ALLOW_WRAP=1 是必须的：本测试台第 [8] 组【故意】发 WRAP 突发，
+    //    用来验证桥会返回 SLVERR —— 那是合法的 AXI 行为（桥只是不支持），
+    //    不能当成协议违规报出来。
+    //
+    // 桥没有 ID 信号，所以 awid/bid/arid/rid 全部接 0。
+    // ============================================================
+    wire [31:0] axi_prot_err;
+
+    axi_protocol_checker #(
+        .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(4), .LEN_W(8),
+        .NAME("axi2apb_s"), .ALLOW_WRAP(1)
+    ) u_axi_check (
+        .clk(clk), .rst_n(rst_n),
+        .awid(4'd0), .awaddr(m_awaddr), .awlen(m_awlen),
+        .awsize(m_awsize), .awburst(m_awburst),
+        .awvalid(m_awvalid), .awready(awready),
+        .wdata(m_wdata), .wstrb(4'hF), .wlast(m_wlast),
+        .wvalid(m_wvalid), .wready(wready),
+        .bid(4'd0), .bresp(bresp), .bvalid(bvalid), .bready(m_bready),
+        .arid(4'd0), .araddr(m_araddr), .arlen(m_arlen),
+        .arsize(m_arsize), .arburst(m_arburst),
+        .arvalid(m_arvalid), .arready(arready),
+        .rid(4'd0), .rdata(rdata), .rresp(rresp_w), .rlast(rlast),
+        .rvalid(rvalid), .rready(m_rready),
+        .error_count(axi_prot_err)
     );
 
     // R 通道监视：看清每一拍读数据是什么时候被取走的
@@ -385,10 +418,22 @@ module tb_axi_to_apb;
 
         // ----------------------------------------------------
         repeat (10) @(posedge clk);
+
+        // ----------------------------------------------------
+        // AXI 协议检查器汇总
+        // ----------------------------------------------------
+        checks = checks + 1;
+        if (axi_prot_err !== 0) begin
+            errors = errors + 1;
+            $display("  [FAIL] AXI 协议检查：发现 %0d 处违规（见上方 [axi2apb_s] 的打印）", axi_prot_err);
+        end
+
         $display("");
         $display("============================================");
+        $display("  AXI 协议检查器：%0d 处违规", axi_prot_err);
+        $display("--------------------------------------------");
         if (errors == 0)
-            $display("===== PASS: %0d 项检查全部通过，APB 协议无违规 =====", checks);
+            $display("===== PASS: %0d 项检查全部通过，AXI 与 APB 协议均无违规 =====", checks);
         else
             $display("===== FAIL: %0d 项检查中 %0d 项失败 =====", checks, errors);
         $display("============================================");

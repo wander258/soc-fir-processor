@@ -393,6 +393,16 @@ module tb_axi_ic;
         end
         $display("  随机激励完成");
 
+        // [6] 未映射地址 → DECERR（不挂死）
+        $display("[6] 未映射地址 → DECERR（不挂死）");
+        m_write(0, 32'h6000_0000, 32'hDEAD_BEEF, 8'd0, resp);
+        checks = checks + 1;
+        if (resp != 2'b11) begin errors = errors + 1; $display("  [FAIL] 未映射写 resp=%b 期望 DECERR(11)", resp); end
+        m_read(1, 32'h6000_0000, 8'd0, rd, resp);
+        checks = checks + 1;
+        if (resp != 2'b11) begin errors = errors + 1; $display("  [FAIL] 未映射读 resp=%b 期望 DECERR(11)", resp); end
+        $display("  未映射地址处理完成");
+
         repeat (5) @(posedge clk);
         $display("");
         $display("============================================");

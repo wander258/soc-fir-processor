@@ -23,7 +23,7 @@
 //   · 每主设备同时最多 1 笔未完成写（m_w_busy 门控），避免单主多从时 W 数据错乱
 //   · 无死锁：依赖全是"主 → 从"单向，B/R 回选只看 ID，不引入"从等主"回路
 //
-// 【未映射地址】dec=5：暂不产生响应（TODO 阶段2.5 补 DECERR 默认从设备）。
+// 【未映射地址】dec=5 → 内部默认错误从设备（第 6 节），回 DECERR，不挂死。
 // ============================================================
 `timescale 1ns/1ps
 
@@ -255,6 +255,9 @@ module axi_ic #(
     output wire                m4_axi_rready
 );
 
+    // 总从设备数 = 5 个外部从设备 + 1 个内部默认错误从设备（未映射地址 → SLVERR）
+    localparam N_SL = N_SLAVE + 1;
+
     // ============================================================
     // 0. 端口 → 内部数组
     // ============================================================
@@ -270,17 +273,17 @@ module axi_ic #(
     wire [N_MASTER-1:0]               s_bvalid, s_bready;
     wire [N_MASTER-1:0]               s_rlast, s_rvalid, s_rready;
 
-    wire [N_SLAVE-1:0][ID_W-1:0]      m_awid, m_arid, m_bid, m_rid;
-    wire [N_SLAVE-1:0][ADDR_W-1:0]    m_awaddr, m_araddr;
-    wire [N_SLAVE-1:0][7:0]           m_awlen, m_arlen;
-    wire [N_SLAVE-1:0][2:0]           m_awsize, m_arsize;
-    wire [N_SLAVE-1:0][1:0]           m_awburst, m_arburst, m_bresp, m_rresp;
-    wire [N_SLAVE-1:0]                m_awvalid, m_awready, m_arvalid, m_arready;
-    wire [N_SLAVE-1:0][DATA_W-1:0]    m_wdata, m_rdata;
-    wire [N_SLAVE-1:0][DATA_W/8-1:0]  m_wstrb;
-    wire [N_SLAVE-1:0]                m_wlast, m_wvalid, m_wready;
-    wire [N_SLAVE-1:0]                m_bvalid, m_bready;
-    wire [N_SLAVE-1:0]                m_rlast, m_rvalid, m_rready;
+    wire [N_SL-1:0][ID_W-1:0]      m_awid, m_arid, m_bid, m_rid;
+    wire [N_SL-1:0][ADDR_W-1:0]    m_awaddr, m_araddr;
+    wire [N_SL-1:0][7:0]           m_awlen, m_arlen;
+    wire [N_SL-1:0][2:0]           m_awsize, m_arsize;
+    wire [N_SL-1:0][1:0]           m_awburst, m_arburst, m_bresp, m_rresp;
+    wire [N_SL-1:0]                m_awvalid, m_awready, m_arvalid, m_arready;
+    wire [N_SL-1:0][DATA_W-1:0]    m_wdata, m_rdata;
+    wire [N_SL-1:0][DATA_W/8-1:0]  m_wstrb;
+    wire [N_SL-1:0]                m_wlast, m_wvalid, m_wready;
+    wire [N_SL-1:0]                m_bvalid, m_bready;
+    wire [N_SL-1:0]                m_rlast, m_rvalid, m_rready;
 
     // ---- 从口 → 数组 ----
     assign s_awid    = {s1_axi_awid,    s0_axi_awid};
@@ -374,25 +377,25 @@ module axi_ic #(
     // ============================================================
     // 2. 写通道：AW 仲裁 + W 跟随 + 每主未完成写门控
     // ============================================================
-    reg  [N_SLAVE-1:0] w_active;   // 从设备有进行中的写突发
-    reg  [N_SLAVE-1:0] w_owner;    // 归属主设备号（1bit）
+    reg  [N_SL-1:0] w_active;   // 从设备有进行中的写突发
+    reg  [N_SL-1:0] w_owner;    // 归属主设备号（1bit）
 
     reg  [N_MASTER-1:0] m_w_busy;  // 主设备有未完成写（单主单写，防 W 数据错乱）
     integer ii;
 
     always @* begin
         m_w_busy = {N_MASTER{1'b0}};
-        for (ii = 0; ii < N_SLAVE; ii = ii + 1) begin
+        for (ii = 0; ii < N_SL; ii = ii + 1) begin
             if (w_active[ii]) m_w_busy[w_owner[ii]] = 1'b1;
         end
     end
 
-    wire [N_SLAVE-1:0][N_MASTER-1:0] aw_req, aw_grant;
-    wire [N_SLAVE-1:0]               aw_hs, w_done;
+    wire [N_SL-1:0][N_MASTER-1:0] aw_req, aw_grant;
+    wire [N_SL-1:0]               aw_hs, w_done;
 
     genvar s;
     generate
-        for (s = 0; s < N_SLAVE; s = s + 1) begin : g_wpath
+        for (s = 0; s < N_SL; s = s + 1) begin : g_wpath
             assign aw_req[s][0] = s_awvalid[0] && (dec_aw[0] == s) && !w_active[s] && !m_w_busy[0];
             assign aw_req[s][1] = s_awvalid[1] && (dec_aw[1] == s) && !w_active[s] && !m_w_busy[1];
 
@@ -439,16 +442,16 @@ module axi_ic #(
     // AWREADY 回选：授权给哪个主，就把从设备的 AWREADY 给哪个主
     assign s_awready[0] = (aw_grant[0][0] & m_awready[0]) | (aw_grant[1][0] & m_awready[1]) |
                           (aw_grant[2][0] & m_awready[2]) | (aw_grant[3][0] & m_awready[3]) |
-                          (aw_grant[4][0] & m_awready[4]);
+                          (aw_grant[4][0] & m_awready[4]) | (aw_grant[5][0] & m_awready[5]);
     assign s_awready[1] = (aw_grant[0][1] & m_awready[0]) | (aw_grant[1][1] & m_awready[1]) |
                           (aw_grant[2][1] & m_awready[2]) | (aw_grant[3][1] & m_awready[3]) |
-                          (aw_grant[4][1] & m_awready[4]);
+                          (aw_grant[4][1] & m_awready[4]) | (aw_grant[5][1] & m_awready[5]);
 
     reg [N_MASTER-1:0] s_wready_comb;
     integer si;
     always @* begin
         s_wready_comb = {N_MASTER{1'b0}};
-        for (si = 0; si < N_SLAVE; si = si + 1) begin
+        for (si = 0; si < N_SL; si = si + 1) begin
             if (w_active[si] && !w_owner[si]) s_wready_comb[0] = s_wready_comb[0] | m_wready[si];
             if (w_active[si] &&  w_owner[si]) s_wready_comb[1] = s_wready_comb[1] | m_wready[si];
         end
@@ -458,16 +461,16 @@ module axi_ic #(
     // ============================================================
     // 3. 写响应 B：每主设备 round-robin（5 从），按 BID 回选主
     // ============================================================
-    wire [N_MASTER-1:0][N_SLAVE-1:0] b_req, b_grant;
+    wire [N_MASTER-1:0][N_SL-1:0] b_req, b_grant;
     wire [N_MASTER-1:0]               b_hs;
 
     genvar m;
     generate
         for (m = 0; m < N_MASTER; m = m + 1) begin : g_bpath
-            for (s = 0; s < N_SLAVE; s = s + 1) begin : g_b_req
+            for (s = 0; s < N_SL; s = s + 1) begin : g_b_req
                 assign b_req[m][s] = m_bvalid[s] && (m_bid[s][0] == m[0]);
             end
-            axi_arbiter #(.N(N_SLAVE)) u_b_arb (
+            axi_arbiter #(.N(N_SL)) u_b_arb (
                 .clk(clk), .rst_n(rst_n),
                 .req(b_req[m]),
                 .advance(b_hs[m]),
@@ -478,20 +481,22 @@ module axi_ic #(
                               | ({ID_W{b_grant[m][1]}} & m_bid[1])
                               | ({ID_W{b_grant[m][2]}} & m_bid[2])
                               | ({ID_W{b_grant[m][3]}} & m_bid[3])
-                              | ({ID_W{b_grant[m][4]}} & m_bid[4]);
+                              | ({ID_W{b_grant[m][4]}} & m_bid[4])
+                              | ({ID_W{b_grant[m][5]}} & m_bid[5]);
             assign s_bresp[m] = ({2{b_grant[m][0]}} & m_bresp[0])
                               | ({2{b_grant[m][1]}} & m_bresp[1])
                               | ({2{b_grant[m][2]}} & m_bresp[2])
                               | ({2{b_grant[m][3]}} & m_bresp[3])
-                              | ({2{b_grant[m][4]}} & m_bresp[4]);
+                              | ({2{b_grant[m][4]}} & m_bresp[4])
+                              | ({2{b_grant[m][5]}} & m_bresp[5]);
             assign s_bvalid[m] = |(b_grant[m] & m_bvalid);
         end
     endgenerate
 
-    reg [N_SLAVE-1:0] m_bready_comb;
+    reg [N_SL-1:0] m_bready_comb;
     always @* begin
-        m_bready_comb = {N_SLAVE{1'b0}};
-        for (si = 0; si < N_SLAVE; si = si + 1) begin
+        m_bready_comb = {N_SL{1'b0}};
+        for (si = 0; si < N_SL; si = si + 1) begin
             m_bready_comb[si] = (b_grant[0][si] & s_bready[0]) | (b_grant[1][si] & s_bready[1]);
         end
     end
@@ -500,11 +505,11 @@ module axi_ic #(
     // ============================================================
     // 4. 读通道：AR 仲裁（每从设备，单拍）
     // ============================================================
-    wire [N_SLAVE-1:0][N_MASTER-1:0] ar_req, ar_grant;
-    wire [N_SLAVE-1:0]               ar_hs;
+    wire [N_SL-1:0][N_MASTER-1:0] ar_req, ar_grant;
+    wire [N_SL-1:0]               ar_hs;
 
     generate
-        for (s = 0; s < N_SLAVE; s = s + 1) begin : g_rpath
+        for (s = 0; s < N_SL; s = s + 1) begin : g_rpath
             assign ar_req[s][0] = s_arvalid[0] && (dec_ar[0] == s);
             assign ar_req[s][1] = s_arvalid[1] && (dec_ar[1] == s);
 
@@ -530,26 +535,26 @@ module axi_ic #(
     // ARREADY 回选
     assign s_arready[0] = (ar_grant[0][0] & m_arready[0]) | (ar_grant[1][0] & m_arready[1]) |
                           (ar_grant[2][0] & m_arready[2]) | (ar_grant[3][0] & m_arready[3]) |
-                          (ar_grant[4][0] & m_arready[4]);
+                          (ar_grant[4][0] & m_arready[4]) | (ar_grant[5][0] & m_arready[5]);
     assign s_arready[1] = (ar_grant[0][1] & m_arready[0]) | (ar_grant[1][1] & m_arready[1]) |
                           (ar_grant[2][1] & m_arready[2]) | (ar_grant[3][1] & m_arready[3]) |
-                          (ar_grant[4][1] & m_arready[4]);
+                          (ar_grant[4][1] & m_arready[4]) | (ar_grant[5][1] & m_arready[5]);
 
     // ============================================================
     // 5. 读数据 R：每主设备 round-robin（5 从），按 RID 回选主，
     //    授权保持到 RLAST（突发期间不换从）
     // ============================================================
-    wire [N_MASTER-1:0][N_SLAVE-1:0] r_req, r_grant_c, r_grant;
+    wire [N_MASTER-1:0][N_SL-1:0] r_req, r_grant_c, r_grant;
     wire [N_MASTER-1:0]               r_hs;
     reg  [N_MASTER-1:0]               r_busy;
-    reg  [N_MASTER-1:0][N_SLAVE-1:0]  r_sel;
+    reg  [N_MASTER-1:0][N_SL-1:0]  r_sel;
 
     generate
         for (m = 0; m < N_MASTER; m = m + 1) begin : g_rrpath
-            for (s = 0; s < N_SLAVE; s = s + 1) begin : g_r_req
+            for (s = 0; s < N_SL; s = s + 1) begin : g_r_req
                 assign r_req[m][s] = m_rvalid[s] && (m_rid[s][0] == m[0]) && !r_busy[m];
             end
-            axi_arbiter #(.N(N_SLAVE)) u_r_arb (
+            axi_arbiter #(.N(N_SL)) u_r_arb (
                 .clk(clk), .rst_n(rst_n),
                 .req(r_req[m]),
                 .advance(r_hs[m]),
@@ -563,24 +568,27 @@ module axi_ic #(
                               | ({ID_W{r_grant[m][1]}} & m_rid[1])
                               | ({ID_W{r_grant[m][2]}} & m_rid[2])
                               | ({ID_W{r_grant[m][3]}} & m_rid[3])
-                              | ({ID_W{r_grant[m][4]}} & m_rid[4]);
+                              | ({ID_W{r_grant[m][4]}} & m_rid[4])
+                              | ({ID_W{r_grant[m][5]}} & m_rid[5]);
             assign s_rdata[m] = ({DATA_W{r_grant[m][0]}} & m_rdata[0])
                               | ({DATA_W{r_grant[m][1]}} & m_rdata[1])
                               | ({DATA_W{r_grant[m][2]}} & m_rdata[2])
                               | ({DATA_W{r_grant[m][3]}} & m_rdata[3])
-                              | ({DATA_W{r_grant[m][4]}} & m_rdata[4]);
+                              | ({DATA_W{r_grant[m][4]}} & m_rdata[4])
+                              | ({DATA_W{r_grant[m][5]}} & m_rdata[5]);
             assign s_rresp[m] = ({2{r_grant[m][0]}} & m_rresp[0])
                               | ({2{r_grant[m][1]}} & m_rresp[1])
                               | ({2{r_grant[m][2]}} & m_rresp[2])
                               | ({2{r_grant[m][3]}} & m_rresp[3])
-                              | ({2{r_grant[m][4]}} & m_rresp[4]);
+                              | ({2{r_grant[m][4]}} & m_rresp[4])
+                              | ({2{r_grant[m][5]}} & m_rresp[5]);
             assign s_rlast[m] = |(r_grant[m] & m_rlast);
             assign s_rvalid[m] = |(r_grant[m] & m_rvalid);
 
             always @(posedge clk or negedge rst_n) begin
                 if (!rst_n) begin
                     r_busy[m] <= 1'b0;
-                    r_sel[m]  <= {N_SLAVE{1'b0}};
+                    r_sel[m]  <= {N_SL{1'b0}};
                 end
                 else if (r_hs[m] && !r_busy[m] && !s_rlast[m]) begin
                     // 多拍读突发：进入 busy，锁住从设备
@@ -595,13 +603,85 @@ module axi_ic #(
         end
     endgenerate
 
-    reg [N_SLAVE-1:0] m_rready_comb;
+    reg [N_SL-1:0] m_rready_comb;
     always @* begin
-        m_rready_comb = {N_SLAVE{1'b0}};
-        for (si = 0; si < N_SLAVE; si = si + 1) begin
+        m_rready_comb = {N_SL{1'b0}};
+        for (si = 0; si < N_SL; si = si + 1) begin
             m_rready_comb[si] = (r_grant[0][si] & s_rready[0]) | (r_grant[1][si] & s_rready[1]);
         end
     end
     assign m_rready = m_rready_comb;
+
+    // ============================================================
+    // 6. 默认错误从设备（内部从设备 5）：未映射地址 → DECERR，不挂死
+    // ============================================================
+    localparam RESP_DECERR = 2'b11;     // AXI DECERR：地址未映射到任何从设备
+
+    // ---- 写路径：收 AW、吸收 W、回 B(DECERR) ----
+    reg          def_w_busy;
+    reg [ID_W-1:0] def_w_id;
+    reg [7:0]      def_w_beat, def_w_len;
+    reg          def_bvalid;
+
+    assign m_awready[5] = !def_w_busy;
+    assign m_wready[5]  = def_w_busy;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            def_w_busy <= 1'b0;
+            def_bvalid <= 1'b0;
+        end
+        else begin
+            if (m_awvalid[5] && m_awready[5]) begin
+                def_w_busy <= 1'b1;
+                def_w_id   <= m_awid[5];
+                def_w_len  <= m_awlen[5];
+                def_w_beat <= 8'd0;
+            end
+            if (def_w_busy && m_wvalid[5] && m_wready[5]) begin
+                if (m_wlast[5] || (def_w_beat == def_w_len)) begin
+                    def_w_busy <= 1'b0;
+                    def_bvalid <= 1'b1;
+                end
+                else def_w_beat <= def_w_beat + 8'd1;
+            end
+            if (def_bvalid && m_bready[5]) def_bvalid <= 1'b0;
+        end
+    end
+
+    assign m_bid[5]    = def_w_id;
+    assign m_bresp[5]  = RESP_DECERR;
+    assign m_bvalid[5] = def_bvalid;
+
+    // ---- 读路径：收 AR、回 R(DECERR) ----
+    reg          def_r_busy;
+    reg [ID_W-1:0] def_r_id;
+    reg [7:0]      def_r_beat, def_r_len;
+
+    assign m_arready[5] = !def_r_busy;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            def_r_busy <= 1'b0;
+        end
+        else begin
+            if (m_arvalid[5] && m_arready[5]) begin
+                def_r_busy <= 1'b1;
+                def_r_id   <= m_arid[5];
+                def_r_len  <= m_arlen[5];
+                def_r_beat <= 8'd0;
+            end
+            if (def_r_busy && m_rvalid[5] && m_rready[5]) begin
+                if (m_rlast[5]) def_r_busy <= 1'b0;
+                else def_r_beat <= def_r_beat + 8'd1;
+            end
+        end
+    end
+
+    assign m_rid[5]    = def_r_id;
+    assign m_rdata[5]  = {DATA_W{1'b0}};
+    assign m_rresp[5]  = RESP_DECERR;
+    assign m_rlast[5]  = (def_r_beat == def_r_len);
+    assign m_rvalid[5] = def_r_busy;
 
 endmodule

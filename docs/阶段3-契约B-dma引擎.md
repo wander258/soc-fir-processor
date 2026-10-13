@@ -108,16 +108,14 @@ module dma_engine #(
 | `m_awlen` / `m_arlen` | `0 ~ 255` | 单个突发 1 ~ 256 拍 |
 | `m_awid` / `m_arid` | `{CH[2:0], 1'b1}` | 契约 C |
 
-**突发类型**（⚠️ 见 B.9 待确认 #1）：
+**突发类型**（✅ 已确认，v1 定稿）：
 
 | 场景 | `m_arburst` / `m_awburst` |
 |---|---|
 | `cfg_src_inc=1` / `cfg_dst_inc=1` | `2'b01`（INCR），地址每拍 +4 |
-| `cfg_src_inc=0` / `cfg_dst_inc=0` | 地址**保持不变**（对应 FIR DIN/DOUT、UART 固定地址） |
+| `cfg_src_inc=0` / `cfg_dst_inc=0` | `2'b00`（FIXED），地址**保持不变**（FIR DIN/DOUT、UART 固定地址） |
 
-> 说明：`契约AB §2.5` 只写了"恒 INCR"，但"三种传输场景"（阶段3-三人分工 §3）要求
-> 固定地址场景，固定地址在 AXI 里对应 FIXED 突发。当前引擎实现为
-> 「inc=1 用 INCR、inc=0 用 FIXED」，本项待三人确认（见 B.9）。
+> 已确认：固定地址用 FIXED 突发（`契约AB §2.5` 已同步更新）。
 
 ---
 
@@ -186,9 +184,8 @@ module dma_engine #(
 
 | # | 事项 | 说明 | 建议 |
 |---|---|---|---|
-| 1 | **固定地址场景的突发类型** | `契约AB §2.5` 写"`m_awburst`/`m_arburst` 恒 INCR"，但"三种传输场景"要求 `SRC_INC=0`/`DST_INC=0` 时地址固定；固定地址只能用 FIXED 突发。当前引擎实现为「inc=1→INCR、inc=0→FIXED」 | 三人确认：固定地址用 FIXED(2'b00)，并回改契约AB §2.5 |
-| 2 | `LEN=0` 语义 | `LEN=0` = 传 0 个字（不是 AXI 的 1 拍）；要传 1 个字写 `LEN=1`（契约AB §1.5 A-1） | 采纳 |
-| 3 | `DONE`/`ERR` 只在下一次 `start` 清除 | 不加 W1C 位（契约AB §5 #4） | 采纳 |
+| 1 | `LEN=0` 语义 | `LEN=0` = 传 0 个字（不是 AXI 的 1 拍）；要传 1 个字写 `LEN=1`（契约AB §1.5 A-1） | 采纳 |
+| 2 | `DONE`/`ERR` 只在下一次 `start` 清除 | 不加 W1C 位（契约AB §5 #4） | 采纳 |
 
 ---
 

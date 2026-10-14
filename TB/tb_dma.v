@@ -174,7 +174,7 @@ module tb_dma;
 
     axi_protocol_checker #(
         .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .LEN_W(LEN_W),
-        .NAME("dma_s"), .ALLOW_WRAP(1)
+        .NAME("dma_s"), .ALLOW_WRAP(0)
     ) u_chk_s (
         .clk(clk), .rst_n(rst_n),
         .awid(s_awid), .awaddr(s_awaddr), .awlen(s_awlen), .awsize(s_awsize),
@@ -191,7 +191,7 @@ module tb_dma;
 
     axi_protocol_checker #(
         .ADDR_W(ADDR_W), .DATA_W(DATA_W), .ID_W(ID_W), .LEN_W(LEN_W),
-        .NAME("dma_m"), .ALLOW_WRAP(1)
+        .NAME("dma_m"), .ALLOW_WRAP(0)
     ) u_chk_m (
         .clk(clk), .rst_n(rst_n),
         .awid(m_awid), .awaddr(m_awaddr), .awlen(m_awlen), .awsize(m_awsize),
@@ -253,6 +253,10 @@ module tb_dma;
             @(negedge clk); s_wvalid = 1'b0; s_wlast = 1'b0;
 
             while (!(s_bvalid && s_bready)) @(negedge clk);
+            if (s_bresp !== 2'b00) begin
+                errors = errors + 1;
+                $display("  [FAIL] 配置口写 0x%08X 返回 BRESP=0b%0b（期望 OKAY）", a, s_bresp);
+            end
             @(negedge clk); s_bready = 1'b0;
         end
     endtask
@@ -270,6 +274,10 @@ module tb_dma;
 
             while (!(s_rvalid && s_rready)) @(negedge clk);
             d = s_rdata;
+            if (s_rresp !== 2'b00) begin
+                errors = errors + 1;
+                $display("  [FAIL] 配置口读 0x%08X 返回 RRESP=0b%0b（期望 OKAY）", a, s_rresp);
+            end
             @(negedge clk); s_rready = 1'b0;
         end
     endtask

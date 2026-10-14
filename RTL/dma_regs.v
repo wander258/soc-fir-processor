@@ -185,21 +185,40 @@ module dma_regs #(
                                      {8{s_axi_wstrb[1]}}, {8{s_axi_wstrb[0]}}};
 
     // ============================================================
-    // 读数据（组合）：只有 CTRL 合法，且映射来自 st_status
+    // 读数据：只有 CTRL 合法，映射来自 st_status。
+    // 用函数按【给定地址】计算，结果在握手时【寄存器化】锁存，
+    // 避免 st_status 在 RVALID 期间变化导致 R 数据抖动（AXI 要求 R 数据稳定）。
     // ============================================================
-    wire [3:0]   r_ch   = cur_addr[6:4];
-    wire [1:0]   r_rt   = cur_addr[3:2];
-    wire         r_beat_ok = !r_err && f_legal(cur_addr) && (r_rt == 2'd3);
-    wire [DATA_W-1:0] ctrl_rd = { st_status[r_ch*32+1], st_status[r_ch*32+0],
-                                  st_status[r_ch*32+2], {(DATA_W-6){1'b0}},
-                                  inc_r[r_ch][1], inc_r[r_ch][0], 1'b0 };
+    function [DATA_W-1:0] f_rddata;
+        input [ADDR_W-1:0] a;
+        input              err;
+        begin
+            if (!err && f_legal(a) && (a[3:2] == 2'd3))
+                f_rddata = { st_status[a[6:4]*32+1], st_status[a[6:4]*32+0],
+                             st_status[a[6:4]*32+2], {(DATA_W-6){1'b0}},
+                             inc_r[a[6:4]][1], inc_r[a[6:4]][0], 1'b0 };
+            else
+                f_rddata = {DATA_W{1'b0}};
+        end
+    endfunction
 
-    assign s_axi_rdata = (state == S_RBEAT) ? (r_beat_ok ? ctrl_rd : {DATA_W{1'b0}})
-                                            : {DATA_W{1'b0}};
-    assign s_axi_rresp = (state == S_RBEAT) ? (r_beat_ok ? RESP_OKAY : RESP_SLVERR)
-                                            : RESP_OKAY;
-    assign s_axi_rlast = (state == S_RBEAT) && (beat == r_len);
-    assign s_axi_rvalid = (state == S_RBEAT);
+    function [1:0] f_rdresp;
+        input [ADDR_W-1:0] a;
+        input              err;
+        begin
+            f_rdresp = (!err && f_legal(a) && (a[3:2] == 2'd3)) ? RESP_OKAY : RESP_SLVERR;
+        end
+    endfunction
+
+    reg              rvalid_r;
+    reg [DATA_W-1:0] rdata_r;
+    reg [1:0]        rresp_r;
+    reg              rlast_r;
+
+    assign s_axi_rvalid = rvalid_r;
+    assign s_axi_rdata  = rdata_r;
+    assign s_axi_rresp  = rresp_r;
+    assign s_axi_rlast  = rlast_r;
 
     assign s_axi_bid    = bid_l;
     assign s_axi_bresp  = w_err ? RESP_SLVERR : RESP_OKAY;
@@ -226,6 +245,10 @@ module dma_regs #(
             r_err     <= 1'b0;
             bid_l     <= {ID_W{1'b0}};
             rid_l     <= {ID_W{1'b0}};
+            rvalid_r  <= 1'b0;
+            rdata_r   <= {DATA_W{1'b0}};
+            rresp_r   <= RESP_OKAY;
+            rlast_r   <= 1'b0;
             start_pulse <= {NCH{1'b0}};
             for (i = 0; i < NCH; i = i + 1) begin
                 src_r[i] <= 32'd0;
@@ -265,6 +288,11 @@ module dma_regs #(
                         r_err    <= ar_wrap_or_resv;
                         rid_l    <= s_axi_arid;
                         beat     <= 8'd0;
+                        // 第一拍读数据：按 araddr 计算并锁存，保证 RVALID 期间稳定
+                        rvalid_r <= 1'b1;
+                        rlast_r  <= (s_axi_arlen == {LEN_W{1'b0}});
+                        rresp_r  <= f_rdresp(s_axi_araddr, ar_wrap_or_resv);
+                        rdata_r  <= f_rddata(s_axi_araddr, ar_wrap_or_resv);
                         state    <= S_RBEAT;
                     end
                 end
@@ -314,16 +342,20 @@ module dma_regs #(
                 end
 
                 // ------------------------------------------------
-                // 读数据拍（rvalid/rdata/rresp/rlast 组合产生）
+                // 读数据拍（rvalid/rdata/rresp/rlast 为寄存器输出，握手时逐拍锁存）
                 // ------------------------------------------------
                 S_RBEAT: begin
                     if (r_hs) begin
-                        if (beat == r_len) begin
-                            state <= S_IDLE;
+                        if (rlast_r) begin
+                            rvalid_r <= 1'b0;
+                            state    <= S_IDLE;
                         end
                         else begin
                             beat     <= beat + 8'd1;
                             cur_addr <= r_next;
+                            rlast_r  <= (beat + 8'd1 == r_len);
+                            rresp_r  <= f_rdresp(r_next, r_err);
+                            rdata_r  <= f_rddata(r_next, r_err);
                         end
                     end
                 end

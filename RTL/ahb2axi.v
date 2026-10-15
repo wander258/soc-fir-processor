@@ -202,9 +202,22 @@ module ahb2axi #(
     // 单从设备：系统 HREADY = 自身 HREADY 回环
     assign hready_sys = hready_r;
 
-    // 突发起点（NONSEQ 且系统就绪，且必须处于 IDLE —— 防止完成那一拍重复触发）
-    assign start_burst = HSEL && hready_sys && (HTRANS == HTRANS_NONSEQ)
-                       && (sta_cur == STA_IDLE);
+    // 当前 AXI 事务在本拍完成（AHB 数据相位随之完成）
+    wire txn_done_r = (std_cur == STD_RDATA) && r_ack && (r_beat == b_len);
+    wire txn_done_w = (std_cur == STD_WRESP) && b_ack;
+    wire txn_done   = txn_done_r || txn_done_w;
+
+    // 链式启动：本拍事务完成，且 AHB 已经摆出下一笔 NONSEQ
+    //   ⚠️ 真实 M0 的 AHB 是【流水线】的：背靠背传输之间没有 IDLE 空档，
+    //      下一笔地址在上一笔的数据相位期间就摆出来了。必须在"完成的同一拍"
+    //      把它收进来，否则会丢事务（早期版本要求两笔之间必须有 IDLE，见 review）。
+    wire chain = HSEL && (HTRANS == HTRANS_NONSEQ) && txn_done;
+
+    // 突发起点：
+    //   · 空闲：HREADY=1（系统就绪）且 AHB 给出 NONSEQ
+    //   · 忙  ：本拍事务完成且 AHB 已摆出下一笔 NONSEQ（链式）
+    assign start_burst = HSEL && (HTRANS == HTRANS_NONSEQ) &&
+                         ((sta_cur == STA_IDLE) ? hready_sys : txn_done);
 
     // 突发首拍的方向请求（单拍脉冲，方向用 HWRITE 现场值）
     assign w_data_req = HWRITE && start_burst;
@@ -250,10 +263,13 @@ module ahb2axi #(
                 if (w_ack && (w_beat == b_len)) std_next = STD_WRESP;
             end
             STD_WRESP: begin
-                if (b_ack)                      std_next = STD_IDLE;
+                // b_ack 即本拍完成；若 AHB 已摆出下一笔（chain），直接按新方向续跑
+                if (b_ack)                      std_next = chain ? (HWRITE ? STD_WDATA : STD_RDATA)
+                                                                 : STD_IDLE;
             end
             STD_RDATA: begin
-                if (r_ack && (r_beat == b_len)) std_next = STD_IDLE;
+                if (r_ack && (r_beat == b_len)) std_next = chain ? (HWRITE ? STD_WDATA : STD_RDATA)
+                                                                 : STD_IDLE;
             end
             default: std_next = STD_IDLE;
         endcase
@@ -265,7 +281,7 @@ module ahb2axi #(
         case (aw_cur)
             AW_IDLE: if (w_data_req)      aw_next = AW_REQ;
             AW_REQ : if (m_axi_awready)   aw_next = AW_DONE;
-            AW_DONE: if (b_ack)           aw_next = AW_IDLE;
+            AW_DONE: if (b_ack)           aw_next = (chain &&  HWRITE) ? AW_REQ : AW_IDLE;
             default:                      aw_next = AW_IDLE;
         endcase
     end
@@ -281,7 +297,7 @@ module ahb2axi #(
                      end
             WB_BURST:                              wb_next = WB_DATA;
             WB_RESP: if (b_ack) begin
-                         if (w_data_req)           wb_next = WB_DATA;
+                         if (chain &&  HWRITE)     wb_next = WB_DATA;
                          else                      wb_next = WB_IDLE;
                      end
             default:                               wb_next = WB_IDLE;
@@ -294,7 +310,7 @@ module ahb2axi #(
         case (ar_cur)
             AR_IDLE: if (r_data_req)      ar_next = AR_REQ;
             AR_REQ : if (m_axi_arready)   ar_next = AR_DONE;
-            AR_DONE: if (r_done)          ar_next = AR_IDLE;
+            AR_DONE: if (r_done)          ar_next = (chain && !HWRITE) ? AR_REQ : AR_IDLE;
             default:                      ar_next = AR_IDLE;
         endcase
     end
@@ -305,7 +321,7 @@ module ahb2axi #(
         case (r_cur)
             R_IDLE : if (r_data_req)           r_next = R_DATA;
             R_DATA : if (r_ack) begin
-                         if (r_beat >= b_len)  r_next = R_IDLE;
+                         if (r_beat >= b_len)  r_next = (chain && !HWRITE) ? R_DATA : R_IDLE;
                          else                  r_next = R_BURST;
                      end
             R_BURST:                           r_next = R_DATA;
@@ -356,12 +372,12 @@ module ahb2axi #(
                 b_len   <= len_of(HBURST);
             end
 
-            // W 拍计数：突发起点归 0，握手一次 +1
-            if (w_data_req && wb_cur == WB_IDLE)  w_beat <= 8'd0;
+            // W 拍计数：事务起点归 0（含链式续跑），握手一次 +1
+            if (start_burst)                       w_beat <= 8'd0;
             else if (w_ack)                        w_beat <= w_beat + 8'd1;
 
-            // R 拍计数：突发起点归 0，握手一次 +1
-            if (r_data_req && r_cur == R_IDLE)     r_beat <= 8'd0;
+            // R 拍计数：事务起点归 0（含链式续跑），握手一次 +1
+            if (start_burst)                       r_beat <= 8'd0;
             else if (r_ack)                        r_beat <= r_beat + 8'd1;
 
             // W 握手延迟一拍（写数据期完成时序）

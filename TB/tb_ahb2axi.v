@@ -157,6 +157,10 @@ module tb_ahb2axi;
                 HBURST = burst;
                 HWDATA = wmem[base + i];
                 @(posedge clk);                 // 地址期（桥在此拍采样地址，HREADY 尚为 1）
+                // 最后一拍之后没有后续传输 → 地址相位结束即转 IDLE。
+                // （AHB 流水线要求：地址相位之后必须给出下一笔地址或 IDLE；
+                //   一直保持着同一笔 NONSEQ 会被下游当作"重复请求同一笔"）
+                if (i == nbeats - 1) HTRANS = 2'b00;
                 @(posedge clk);                 // 桥已拉低 HREADY
                 while (!HREADY) @(posedge clk); // 数据期完成
             end
@@ -181,6 +185,8 @@ module tb_ahb2axi;
                 HSIZE  = size;
                 HBURST = burst;
                 @(posedge clk);                 // 地址期
+                // 最后一拍之后转 IDLE（理由同 ahb_write）
+                if (i == nbeats - 1) HTRANS = 2'b00;
                 @(posedge clk);                 // 桥已拉低 HREADY
                 while (!HREADY) @(posedge clk); // 数据期完成
                 rmem[base + i]      = HRDATA;

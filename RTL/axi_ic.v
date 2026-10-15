@@ -12,9 +12,14 @@
 //                     s1 = DMA 数据口（AXI ID=1）
 //   主口（从设备侧）：m0 = FIR       @0x4000_0000  4KB
 //                     m1 = DMA 配置  @0x4000_1000  4KB
-//                     m2 = SRAM      @0x2000_0000 64KB
-//                     m3 = ROM       @0x0000_0000 64KB
+//                     m2 = （阶段4 方案 B 不用，留空）
+//                     m3 = 片内 SRAM @0x0000_0000 64KB
 //                     m4 = AXI→APB   @0x4000_2000 64KB
+//
+//   ⚠️ 主口编号 ≠ 地址顺序：f_decode 里 a[31:16]==16'h0000 → 3'd3（**m3**）、
+//      a[31:16]==16'h2000 → 3'd2（m2）。阶段4 采用方案 B（片内 SRAM @0x0、不做 ROM），
+//      所以 **SRAM 必须接 m3_axi_\***，m2 留空（若悬空请接静态无效值）。
+//      详见 docs/阶段4-三人分工.md §1「地址映射」、RTL/axi_sram.v 头注释。
 //
 // 【仲裁策略】
 //   · AW / AR：每从设备一个 round-robin 仲裁器（2 主）
@@ -161,7 +166,7 @@ module axi_ic #(
     input  wire                m1_axi_rvalid,
     output wire                m1_axi_rready,
 
-    // ============ 主口 2（SRAM）============
+    // ============ 主口 2（0x2000_0000，阶段4 方案 B 留空）============
     output wire [ID_W-1:0]     m2_axi_awid,
     output wire [ADDR_W-1:0]   m2_axi_awaddr,
     output wire [7:0]          m2_axi_awlen,
@@ -192,7 +197,7 @@ module axi_ic #(
     input  wire                m2_axi_rvalid,
     output wire                m2_axi_rready,
 
-    // ============ 主口 3（ROM）============
+    // ============ 主口 3（0x0000_0000，阶段4 方案 B 接片内 SRAM）============
     output wire [ID_W-1:0]     m3_axi_awid,
     output wire [ADDR_W-1:0]   m3_axi_awaddr,
     output wire [7:0]          m3_axi_awlen,

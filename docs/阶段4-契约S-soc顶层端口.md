@@ -30,8 +30,9 @@ module soc_top #(
     parameter ADDR_W     = 32,
     parameter DATA_W     = 32,
     parameter ID_W       = 4,
-    parameter SRAM_BYTES = 65536,   // 片内 SRAM 大小（64KB）
-    parameter UART_DIV   = 10       // UART 分频（仿真用大值把波特率降下来）
+    parameter SRAM_BYTES = 65536,       // 片内 SRAM 大小（64KB）
+    parameter CLK_FREQ   = 100_000_000, // 时钟频率（Hz），给 UART 算波特率用
+    parameter UART_DIV   = 10           // UART 分频：BAUD = CLK_FREQ / UART_DIV
 )(
     input  wire clk,        // 单一时钟域（仿真里可用 100MHz，综合目标 50MHz）
     input  wire rst_n,      // 低有效异步复位
@@ -62,8 +63,9 @@ module soc_top #(
 | `ADDR_W` | 32 | 地址位宽 | 所有子模块 |
 | `DATA_W` | 32 | 数据位宽 | 所有子模块 |
 | `ID_W` | 4 | AXI ID 位宽（与互连、契约C 一致） | `axi_ic` / `dma` |
-| `SRAM_BYTES` | 65536 | 片内 SRAM 字节数（64KB） | `axi_sram`（B 的件） |
-| `UART_DIV` | 10 | UART 分频系数 | `uart_apb`，**见 S.10-③** |
+| `SRAM_BYTES` | 65536 | 片内 SRAM 字节数（64KB） | `axi_sram`（B 已交付，挂在互连 **m3**） |
+| `CLK_FREQ` | 100_000_000 | 时钟频率（Hz） | `uart_apb`（算波特率用） |
+| `UART_DIV` | 10 | UART 分频系数 | `uart_apb`：**内部换算** `BAUD = CLK_FREQ / UART_DIV` |
 
 ---
 
@@ -85,11 +87,11 @@ module soc_top #(
 
 | 模块 | 偏移 | 寄存器 |
 |---|---|---|
-| FIR | `0x00` / `0x04` / `0x08` | CTRL(W) / DIN(W) / DOUT(R) |
+| FIR | `0x000` / `0x004` / `0x008` / `0x00C` / `0x100+` | CTRL(W) / DIN(W) / DOUT(R) / **STATUS(R)** / COEF(W) |
 | DMA | `0x00+0x10·N` … `0x0C+0x10·N` | SRC / DST / LEN / CTRL（契约AB §1） |
 | UART | `0x000` / `0x004` | DATA(W) / STATUS(R) |
 
-> ⚠️ **见 S.10-②**：分工文档的表格与框图写的是「SRAM @0x0 挂 `m2`」，与互连译码不符。
+> ✅ 分工文档早期版本这里写错过（写成 `m2`），**已在 `3a61f0a` 修正为 `m3`**；本表与其一致。
 
 ---
 
@@ -156,7 +158,7 @@ CPU 的 `IRQ[31:0]` 输入按下表连线（IRQ 号 = 异常号 − 16）：
      ├─ m0 → fir.v            @0x4000_0000
      ├─ m1 → dma.v            @0x4000_1000
      ├─ m2 →（预留，tie-off）
-     ├─ m3 → axi_sram.v       @0x0000_0000   ← B 的件（先可用空壳）
+     ├─ m3 → axi_sram.v       @0x0000_0000   ← B 已交付
      └─ m4 → axi_to_apb.v ──APB──► uart_apb.v @0x4000_2000
 ```
 
@@ -173,20 +175,20 @@ CPU 的 `IRQ[31:0]` 输入按下表连线（IRQ 号 = 异常号 − 16）：
 | AXI→APB 桥 | `RTL/axi_to_apb.v` | 阶段1 |
 | UART | `RTL/uart_apb.v` + `uart_rx.v` + `uart_tx.v` | 阶段1 |
 
-**B 的 SRAM 未到之前**：A 先用「端口齐全、读恒 0」的空壳把顶层连起来跑通，B 的真件到了直接替换。
+**B 的 SRAM 已交付**（`RTL/axi_sram.v`）：A 直接接互连 **`m3_axi_*`** 即可；若一时还没合上，可先用「端口齐全、读恒 0」的空壳占位。
 
 ---
 
-## S.10 ⚠️ 与分工文档不一致的 4 处（已核对 RTL，需确认后写回文档）
+## S.10 与分工文档的 4 处不一致（✅ 已全部拍定并写回文档）
 
-这 4 处是我写本契约时**逐条对照 RTL 发现的**，都影响 A 的连线，**建议三人当场拍定**：
+写本契约时逐条对照 RTL 发现 4 处，**已全部拍定并写回 `docs/阶段4-三人分工.md`**：
 
-| # | 分工文档写的 | RTL 实际情况 | 建议 |
+| # | 原问题 | 结论 | 落在哪 |
 |---|---|---|---|
-| ① | 「Cortex-M0 → **AHB-Lite** → `ahb2axi.v`」 | `cortexm0ds.v` **自带 ARM 的 `ahb2axi4_if`，对外直接就是 AXI4**（且**无 ID 信号**）；AHB-Lite 只在 `cortexm0ds_logic.v` 上 | **二选一**：(a) 用 `cortexm0ds.v`（AXI 直连互连，CPU 侧 ID 恒 0），我们 B 的 `ahb2axi.v` 就不用了；(b) 用 `cortexm0ds_logic.v`（AHB）+ 我们的 `ahb2axi.v`（补 ID=0）。**推荐 (b)**（我们自己的桥已测过，链路清晰） |
-| ② | 「SRAM @`0x0000_0000` 挂 **`m2`**」（表格和框图都这么写） | 互连译码是 **`0x0000_0000` → `m3`**、`0x2000_0000` → `m2` | **SRAM 必须挂 `m3`**，否则 CPU 在 `0x0` 取不到向量表、根本起不来。文档应改 `m3`（互连已冻结，不建议改译码） |
-| ③ | 契约 S 参数叫 `UART_DIV`（分频） | `uart_apb.v` 的参数是 `CLK_FREQ` / `BAUD`（**不是分频系数**） | `soc_top` 内部换算：`BAUD = CLK_FREQ / UART_DIV`（需再定一个 `CLK_FREQ`，或把契约参数直接改成 `CLK_FREQ`+`BAUD`） |
-| ④ | 「M0 的 SWD 仿真里不接，A 顶层固定电平」 | 本 IP **根本没有 SWD 端口** | 该条作废，无需处理 |
+| ① | CPU 走 AHB-Lite 还是 AXI 含糊 | 采用 **`cortexm0ds_logic.v`（AHB-Lite）+ 我们的 `ahb2axi.v`（补 ID=0）**；`cortexm0ds.v`（自带 ARM 桥、对外 AXI 且无 ID）**不采用** | 分工文档 §2.1 框图 + 注释 |
+| ② | 「SRAM @`0x0` 挂 `m2`」 | **改挂 `m3`**（互连译码 `0x0 → m3`）；`m2` 留空并接静态无效值 | 分工文档 §1（提交 `3a61f0a`） |
+| ③ | 契约 S 的 `UART_DIV` 透不到 `uart_apb` | **新增 `CLK_FREQ` 参数**，内部换算 `BAUD = CLK_FREQ / UART_DIV` | 分工文档 §1 + 本契约 §S.1 / §S.3 |
+| ④ | 「M0 的 SWD 顶层固定电平」 | 本 IP **无 SWD 端口**，该条作废 | 分工文档 §1 |
 
 ---
 
@@ -216,4 +218,4 @@ CPU 的 `IRQ[31:0]` 输入按下表连线（IRQ 号 = 异常号 − 16）：
 - [ ] 端口/参数与 §S.1 **逐字一致**（C 的 `tb_soc.v` 能直接例化）
 - [ ] 地址映射与 §S.4 逐条一致（C 的 `sw/` 能正确定位外设）
 - [ ] 中断连线与 §S.5 逐条一致（IRQ0~IRQ8 接上，其余恒 0）
-- [ ] §S.10 的 4 处不一致**全部拍定并写回文档**
+- [x] §S.10 的 4 处不一致**已全部拍定并写回分工文档** ✅

@@ -11,9 +11,12 @@
 //   · WSTRB 字节选通（窄传输写）
 //   · RLAST 由拍数对齐自动产生
 //   · 错误注入：起始地址 == err_addr 的事务返回 SLVERR（BRESP/RRESP = 2'b10）
+//     （err_addr 是【完整地址】，不是相对 BASE 的偏移）
+//   · 基址 BASE：内部用 (addr - BASE) 当索引，所以大基址（如 0x2000_0000）
+//     不必分配超大数组；同一测试台里多个从设备各自传自己的 BASE 即可。
 //
 // 【怎么用】
-//   axi_mem_model #(.MEM_BYTES(16384)) u_mem (
+//   axi_mem_model #(.BASE(32'h2000_0000), .MEM_BYTES(16384)) u_mem (
 //       .clk(clk), .rst_n(rst_n),
 //       .awid(awid), .awaddr(awaddr), .awlen(awlen), .awsize(awsize),
 //       .awburst(awburst), .awvalid(awvalid), .awready(awready),
@@ -42,6 +45,7 @@ module axi_mem_model #(
     parameter ADDR_W = 32,
     parameter DATA_W = 32,
     parameter ID_W   = 4,
+    parameter BASE      = 32'h0,      // 本从设备基址：索引前先减掉（默认 0，即从 0 编址）
     parameter MEM_BYTES = 16384
 )(
     input  wire                 clk,
@@ -95,7 +99,7 @@ module axi_mem_model #(
 
     wire [ADDR_W-1:0] w_beat_addr = (w_burst == BURST_FIXED) ? w_start
                                    : (w_start + ({{(ADDR_W-8){1'b0}}, w_beat} << w_size));
-    wire [ADDR_W-1:0] w_word_base = w_beat_addr & ~(ADDR_W'(4'd3));
+    wire [ADDR_W-1:0] w_word_base = (w_beat_addr & ~(ADDR_W'(4'd3))) - BASE;
 
     wire aw_hs = awvalid && awready;
     wire w_hs  = wvalid  && wready;
@@ -162,7 +166,7 @@ module axi_mem_model #(
 
     wire [ADDR_W-1:0] r_beat_addr = (r_burst == BURST_FIXED) ? r_start
                                    : (r_start + ({{(ADDR_W-8){1'b0}}, r_beat} << r_size));
-    wire [ADDR_W-1:0] r_word_base = r_beat_addr & ~(ADDR_W'(4'd3));
+    wire [ADDR_W-1:0] r_word_base = (r_beat_addr & ~(ADDR_W'(4'd3))) - BASE;
 
     wire ar_hs = arvalid && arready;
     wire r_hs  = rvalid  && rready;

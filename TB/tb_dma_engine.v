@@ -16,7 +16,7 @@
 //
 // 运行（从仓库根目录）：
 //   iverilog -g2012 -Wall -o sim.out RTL/dma_engine.v RTL/sync_fifo.v \
-//             TB/axi_protocol_checker.v TB/tb_dma_engine.v
+//             TB/axi_mem_model.v TB/axi_protocol_checker.v TB/tb_dma_engine.v
 //   vvp sim.out
 // ============================================================
 `timescale 1ns/1ps

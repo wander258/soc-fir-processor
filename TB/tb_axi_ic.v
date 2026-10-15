@@ -9,7 +9,7 @@
 //   [5] 长时间随机激励，无死锁（超时即 FAIL）
 //
 // 运行：
-//   iverilog -g2012 -o sim_ic.out RTL/axi_arbiter.v RTL/axi_ic.v TB/tb_axi_ic.v
+//   iverilog -g2012 -o sim_ic.out RTL/axi_arbiter.v RTL/axi_ic.v TB/axi_mem_model.v TB/tb_axi_ic.v
 //   vvp sim_ic.out
 // ============================================================
 `timescale 1ns/1ps
@@ -109,10 +109,28 @@ module tb_axi_ic;
         .m4_axi_rid(slv_rid[4]), .m4_axi_rdata(slv_rdata[4]), .m4_axi_rresp(slv_rresp[4]), .m4_axi_rlast(slv_rlast[4]), .m4_axi_rvalid(slv_rvalid[4]), .m4_axi_rready(slv_rready[4])
     );
 
+    // 5 个从设备的基地址（契约任务三）—— 定义在例化之前，供 generate 里的 BASE 使用
+    function [ADDR_W-1:0] slave_base;
+        input integer s;
+        begin
+            case (s)
+                0: slave_base = 32'h4000_0000;  // FIR
+                1: slave_base = 32'h4000_1000;  // DMA
+                2: slave_base = 32'h2000_0000;  // SRAM
+                3: slave_base = 32'h0000_0000;  // ROM
+                4: slave_base = 32'h4000_2000;  // APB
+                default: slave_base = 32'h4000_0000;
+            endcase
+        end
+    endfunction
+
     genvar g;
     generate
         for (g = 0; g < 5; g = g + 1) begin : g_slv
-            axi_mem_model #(.ID_W(ID_W), .DATA_W(DATA_W), .ADDR_W(ADDR_W)) u_slv (
+            // 每个从设备传自己的基址：axi_mem_model 内部用 (addr - BASE) 当索引
+            localparam [ADDR_W-1:0] SLV_BASE = slave_base(g);
+            axi_mem_model #(.ID_W(ID_W), .DATA_W(DATA_W), .ADDR_W(ADDR_W),
+                            .BASE(SLV_BASE)) u_slv (
                 .clk(clk), .rst_n(rst_n),
                 .awid(slv_awid[g]), .awaddr(slv_awaddr[g]), .awlen(slv_awlen[g]),
                 .awsize(slv_awsize[g]), .awburst(slv_awburst[g]), .awvalid(slv_awvalid[g]), .awready(slv_awready[g]),
@@ -211,21 +229,6 @@ module tb_axi_ic;
         end
     endtask
 
-    // 5 个从设备的基地址（契约任务三）
-    function [ADDR_W-1:0] slave_base;
-        input integer s;
-        begin
-            case (s)
-                0: slave_base = 32'h4000_0000;  // FIR
-                1: slave_base = 32'h4000_1000;  // DMA
-                2: slave_base = 32'h2000_0000;  // SRAM
-                3: slave_base = 32'h0000_0000;  // ROM
-                4: slave_base = 32'h4000_2000;  // APB
-                default: slave_base = 32'h4000_0000;
-            endcase
-        end
-    endfunction
-
     reg [DATA_W-1:0] rd;
     reg [1:0] resp;
     integer i, s, m;
@@ -249,10 +252,10 @@ module tb_axi_ic;
             for (s = 0; s < 5; s = s + 1) begin
                 m_write(m, slave_base(s), 32'hA000_0000 + m*32'h100 + s, 8'd0, resp);
                 checks = checks + 1;
-                if (resp != 2'b00) begin errors = errors + 1; $display("  [FAIL] m%0d->s%0d 写 resp=%b", m, s, resp); end
+                if (resp !== 2'b00) begin errors = errors + 1; $display("  [FAIL] m%0d->s%0d 写 resp=%b", m, s, resp); end
                 m_read(m, slave_base(s), 8'd0, rd, resp);
                 checks = checks + 1;
-                if (rd != 32'hA000_0000 + m*32'h100 + s) begin
+                if (rd !== 32'hA000_0000 + m*32'h100 + s) begin
                     errors = errors + 1;
                     $display("  [FAIL] m%0d->s%0d 读回 = %h 期望 %h", m, s, rd, 32'hA000_0000 + m*32'h100 + s);
                 end
@@ -267,9 +270,9 @@ module tb_axi_ic;
             begin m_write(1, slave_base(2), 32'h2222_2222, 8'd0, resp); end
         join
         m_read(0, slave_base(0), 8'd0, rd, resp);
-        if (rd != 32'h1111_1111) begin errors = errors + 1; $display("  [FAIL] 并行 m0->s0 读回=%h", rd); end
+        if (rd !== 32'h1111_1111) begin errors = errors + 1; $display("  [FAIL] 并行 m0->s0 读回=%h", rd); end
         m_read(1, slave_base(2), 8'd0, rd, resp);
-        if (rd != 32'h2222_2222) begin errors = errors + 1; $display("  [FAIL] 并行 m1->s2 读回=%h", rd); end
+        if (rd !== 32'h2222_2222) begin errors = errors + 1; $display("  [FAIL] 并行 m1->s2 读回=%h", rd); end
         checks = checks + 2;
         $display("  并行写完成");
 
@@ -281,7 +284,7 @@ module tb_axi_ic;
         join
         // 后写的覆盖先写的，读到 0x33333333 或 0x44444444 都算仲裁正确（无死锁、无丢写）
         m_read(0, slave_base(3), 8'd0, rd, resp);
-        if (rd != 32'h3333_3333 && rd != 32'h4444_4444) begin
+        if (rd !== 32'h3333_3333 && rd !== 32'h4444_4444) begin
             errors = errors + 1; $display("  [FAIL] 仲裁后读回=%h", rd);
         end
         checks = checks + 1;
@@ -291,10 +294,10 @@ module tb_axi_ic;
         $display("[4] INCR 突发（4 拍写 + 4 拍读）");
         m_write(0, slave_base(2), 32'hCAFE_0000, 8'd3, resp);
         checks = checks + 1;
-        if (resp != 2'b00) begin errors = errors + 1; $display("  [FAIL] INCR 写 resp=%b", resp); end
+        if (resp !== 2'b00) begin errors = errors + 1; $display("  [FAIL] INCR 写 resp=%b", resp); end
         m_read(1, slave_base(2), 8'd3, rd, resp);
         checks = checks + 1;
-        if (rd != 32'hCAFE_0000) begin errors = errors + 1; $display("  [FAIL] INCR 读回=%h", rd); end
+        if (rd !== 32'hCAFE_0000) begin errors = errors + 1; $display("  [FAIL] INCR 读回=%h", rd); end
         $display("  INCR 突发完成");
 
         // [5] 随机激励（长时间，无死锁）
@@ -303,7 +306,7 @@ module tb_axi_ic;
             m = i % 2; s = (i / 2) % 5;
             if (i % 2 == 0) begin
                 m_write(m, slave_base(s), i[31:0], 8'd0, resp);
-                if (resp != 2'b00) begin errors = errors + 1; $display("  [FAIL] 随机写 resp=%b @i=%0d", resp, i); end
+                if (resp !== 2'b00) begin errors = errors + 1; $display("  [FAIL] 随机写 resp=%b @i=%0d", resp, i); end
             end
             else begin
                 m_read(m, slave_base(s), 8'd0, rd, resp);
@@ -316,10 +319,10 @@ module tb_axi_ic;
         $display("[6] 未映射地址 → DECERR（不挂死）");
         m_write(0, 32'h6000_0000, 32'hDEAD_BEEF, 8'd0, resp);
         checks = checks + 1;
-        if (resp != 2'b11) begin errors = errors + 1; $display("  [FAIL] 未映射写 resp=%b 期望 DECERR(11)", resp); end
+        if (resp !== 2'b11) begin errors = errors + 1; $display("  [FAIL] 未映射写 resp=%b 期望 DECERR(11)", resp); end
         m_read(1, 32'h6000_0000, 8'd0, rd, resp);
         checks = checks + 1;
-        if (resp != 2'b11) begin errors = errors + 1; $display("  [FAIL] 未映射读 resp=%b 期望 DECERR(11)", resp); end
+        if (resp !== 2'b11) begin errors = errors + 1; $display("  [FAIL] 未映射读 resp=%b 期望 DECERR(11)", resp); end
         $display("  未映射地址处理完成");
 
         repeat (5) @(posedge clk);

@@ -1,0 +1,24 @@
+sw/ —— Cortex-M0 固件（阶段4 分工 C）
+
+文件：
+  startup.s    启动代码（向量表 + Reset_Handler + 默认中断）
+  linker.ld    链接脚本（SRAM @0x0000_0000，64KB，方案 B）
+  main.c       C 驱动（冒烟测试 + UART 回显 demo）
+  build.py     编译脚本（自动探测工具链，出 firmware.hex）
+
+怎么编：
+  python sw/build.py            编译
+  python sw/build.py --check    只探测工具链
+
+需要 ARM 裸机工具链 arm-none-eabi-gcc（不是 keil、不是 mingw）：
+  https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
+  装的时候务必勾选 Add path to environment variable
+  装在别处也没关系，build.py 会扫常见位置；还找不到就改它的 patterns
+
+产出：
+  firmware.elf   调试用
+  firmware.bin   原始二进制
+  firmware.hex   【给 TB/tb_soc.v 的 $readmemh 用】每行一个 32bit 小端字
+
+地址依据：docs/阶段4-契约S-soc顶层端口.md §S.4 / §S.6
+寄存器依据：docs/任务三_地址映射与中断分配.md §4.1 / §4.2 / §4.3

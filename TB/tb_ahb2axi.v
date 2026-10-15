@@ -16,7 +16,7 @@
 //   [8] 长时间随机读写，无死锁 + 协议零违规
 //
 // 运行（从仓库根目录）：
-//   iverilog -g2012 -Wall -o sim.out RTL/ahb2axi.v TB/tb_ahb2axi.v
+//   iverilog -g2012 -Wall -o sim.out RTL/ahb2axi.v TB/axi_mem_model.v TB/tb_ahb2axi.v
 //   vvp sim.out
 // ============================================================
 `timescale 1ns/1ps
